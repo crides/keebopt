@@ -1,8 +1,7 @@
-#[macro_use]
-extern crate serde_derive;
-
 // mod annealing;
 mod layout;
+
+use rayon::prelude::*;
 
 use std::collections::BTreeMap;
 
@@ -39,12 +38,12 @@ fn main() {
             let maps = {
                 let mut maps: Vec<(Char, Chord)> =
                     layout.0.iter().map(|(&c, ch)| (c, ch.clone())).collect();
-                maps.sort_by_key(|p| matches!(p.0, Char::Char(..)));
+                maps.sort_by_key(|p| if matches!(p.0, Char::Char(..)) { 0 } else { 1 });
                 maps
             };
-            let mut new_layouts = (0usize..26)
+            let mut new_layouts = (0usize..26).into_par_iter()
                 .flat_map(|i| {
-                    ((i + 1)..Layout::CHORD_NUM_POS)
+                    ((i + 1)..Layout::CHORD_NUM_POS).into_par_iter()
                         .map(|j| {
                             let mut new_maps = maps.clone();
                             let old_char = new_maps[i].0;
