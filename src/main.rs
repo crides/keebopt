@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-use layout::{Chord, FreqsData, Layout};
+use layout::{Chord, FreqsData, Layout, Char};
 
 pub fn progress_bar(len: usize, msg: &str) -> ProgressBar {
     let pbar = ProgressBar::new(len as u64).with_style(
@@ -29,16 +29,17 @@ fn main() {
 
     let mut target = 30000000000000.0f64;
     let mut lowest_count = 0;
+    let layout_cost_cache = Layout::costs();
     loop {
         let mut layout = Layout::init();
-        let init_cost = layout.total_cost(&freqs_data);
+        let init_cost = layout.total_cost(&freqs_data, &layout_cost_cache);
         let mut cost = init_cost;
 
         for cycle in 0.. {
             let maps = {
-                let mut maps: Vec<(Chord, char)> =
-                    layout.0.iter().map(|(ch, &c)| (ch.clone(), c)).collect();
-                maps.sort_by_key(|p| if p.1 == ' ' { 1 } else { 0 });
+                let mut maps: Vec<(Char, Chord)> =
+                    layout.0.iter().map(|(&c, ch)| (c, ch.clone())).collect();
+                maps.sort_by_key(|p| matches!(p.0, Char::Char(..)));
                 maps
             };
             let mut new_layouts = (0usize..26)
@@ -46,11 +47,11 @@ fn main() {
                     ((i + 1)..Layout::CHORD_NUM_POS)
                         .map(|j| {
                             let mut new_maps = maps.clone();
-                            let old_char = new_maps[i].1;
-                            new_maps[i].1 = new_maps[j].1;
-                            new_maps[j].1 = old_char;
+                            let old_char = new_maps[i].0;
+                            new_maps[i].0 = new_maps[j].0;
+                            new_maps[j].0 = old_char;
                             let new_layout = Layout(new_maps.into_iter().collect());
-                            let new_cost = new_layout.total_cost(&freqs_data);
+                            let new_cost = new_layout.total_cost(&freqs_data, &layout_cost_cache);
                             (new_layout, new_cost)
                         })
                         .collect::<Vec<_>>()
