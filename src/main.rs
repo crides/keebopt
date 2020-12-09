@@ -21,7 +21,7 @@ pub fn progress_bar(len: usize, msg: &str) -> ProgressBar {
 
 fn main() {
     let freqs_data: FreqsData =
-        serde_json::from_str::<BTreeMap<String, usize>>(include_str!("../ngrams-all.json"))
+        serde_json::from_str::<BTreeMap<String, usize>>(include_str!("../ngram3.json"))
             .unwrap()
             .into_iter()
             .collect();
@@ -70,6 +70,7 @@ fn main() {
             println!("cost: {}, ratio: {}", cost, cost / init_cost);
             layout.print();
             target = cost;
+            lowest_count = 0;
             println!("==============================");
             println!("||  New Target: {}", target);
             println!("==============================");
@@ -86,8 +87,10 @@ fn main() {
                 .spawn()
                 .unwrap();
         }
-        if lowest_count > 0 {
-            // We've hit it more than 1 times
+        if lowest_count > 2 {
+            // We've hit it more than 3 times
+            println!("cost: {}, ratio: {}", cost, cost / init_cost);
+            layout.print();
             break;
         }
     }

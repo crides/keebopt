@@ -21,18 +21,17 @@ pub struct Chord(pub ChordStore);
 pub type CostCache = [[f64; Layout::KEYS_NUM]; Layout::KEYS_NUM];
 
 impl Layout {
-    pub const KEYS: &'static [u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    pub const KEYS_COST: &'static [f64] = &[3.2, 1.0, 1.1, 1.4, 2.3, 3.2, 1.0, 1.1, 1.4, 2.3];
-    pub const KEYS_NUM: usize = Layout::KEYS.len();
-    pub const CHORD_NUM_POS: usize = Layout::KEYS_NUM + Layout::KEYS_NUM * (Layout::KEYS_NUM - 1) / 2 - 2;
+    pub const KEYS_COST: &'static [f64] = &[1.0, 1.1, 1.4, 2.3, 1.0, 1.1, 1.4, 2.3];
+    pub const KEYS_NUM: usize = Layout::KEYS_COST.len();
+    pub const CHORD_NUM_POS: usize = Layout::KEYS_NUM + Layout::KEYS_NUM * (Layout::KEYS_NUM - 1) / 2;
     pub fn costs() -> CostCache {
         let mut costs = [[0.0; Layout::KEYS_NUM]; Layout::KEYS_NUM];
-        for i in Layout::KEYS {
-            for j in Layout::KEYS {
+        for i in 0..Layout::KEYS_NUM {
+            for j in 0..Layout::KEYS_NUM {
                 if i == j {
-                    costs[*i as usize][*i as usize] = Layout::_chord_cost(&Chord(smallvec![*i]));
+                    costs[i][i] = Layout::_chord_cost(&Chord(smallvec![i as u8]));
                 } else {
-                    costs[*i as usize][*j as usize] = Layout::_chord_cost(&Chord(smallvec![*i, *j]));
+                    costs[i][j] = Layout::_chord_cost(&Chord(smallvec![i as u8, j as u8]));
                 }
             }
         }
@@ -50,15 +49,11 @@ impl Layout {
             .collect();
         Layout(
             (0..Layout::KEYS_NUM)
-                .map(|i| smallvec![Layout::KEYS[i]])
+                .map(|i| smallvec![i as u8])
                 .chain((0..Layout::KEYS_NUM).flat_map(|i| {
                     ((i + 1)..Layout::KEYS_NUM)
-                        .filter_map(|j| {
-                            if i == 0 && j == 6 || i == 1 && j == 5 {
-                                None
-                            } else {
-                                Some(smallvec![Layout::KEYS[i], Layout::KEYS[j]])
-                            }
+                        .map(|j| {
+                            smallvec![i as u8, j as u8]
                         })
                         .collect::<Vec<_>>()
                 }))
@@ -85,11 +80,11 @@ impl Layout {
             };
             let (a, b) = (Layout::cost(big), Layout::cost(small));
             (a + b)
-                * if big - 5 == small {
+                * if big - 4 == small {
                     1.5
-                } else if big >= 5 && small >= 5 || big < 5 && small < 5 {
+                } else if big >= 4 && small >= 4 || big < 4 && small < 4 {
                     1.0
-                } else if small == 1 && big == 7 || big == 7 && small == 3 || big == 8 && small == 4 {
+                } else if small == 0 && big == 5 || big == 5 && small == 2 || big == 6 && small == 3 {
                     1.9
                 } else {
                     1.3
@@ -117,12 +112,8 @@ impl Layout {
                 cost +=
                 if small == big {
                     0.5 * Layout::cost(small)
-                } else if small == big - 5 {
+                } else if small == big - 4 {
                     Layout::cost(small)
-                } else if small == 0 && big == 6 || small == 1 && big == 5 {
-                    (Layout::cost(1) + Layout::cost(5)) / 2.0 * 1.414
-                } else if small == 0 && big == 1 || small == 5 && big == 6 {
-                    (Layout::cost(1) + Layout::cost(5)) / 2.0
                 } else {
                     0.0
                 }
@@ -154,7 +145,7 @@ impl Layout {
 
     fn repr_chord(chord: Chord) -> String {
         let keys: BTreeSet<u8> = chord.0.into_iter().collect();
-        [(0, 5), (1, 6), (2, 7), (3, 8), (4, 9)]
+        [(0, 4), (1, 5), (2, 6), (3, 7)]
             .iter()
             .map(|(top, bottom)| {
                 let dyad = (keys.contains(top), keys.contains(bottom));
