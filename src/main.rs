@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-use layout::{Chord, FreqsData, Layout, Char};
+use layout::{CharMap, Layout};
 
 pub fn progress_bar(len: usize, msg: &str) -> ProgressBar {
     let pbar = ProgressBar::new(len as u64).with_style(
@@ -20,14 +20,16 @@ pub fn progress_bar(len: usize, msg: &str) -> ProgressBar {
 }
 
 fn main() {
-    let freqs_data: FreqsData =
-        serde_json::from_str::<BTreeMap<String, usize>>(include_str!("../ngram3.json"))
+    let freqs_data_raw: BTreeMap<String, usize> =
+        serde_json::from_str::<BTreeMap<String, usize>>(include_str!("../ngrams-all.json"))
             .unwrap()
             .into_iter()
             .collect();
 
     let mut target = 30000000000000.0f64;
     let mut lowest_count = 0;
+    let char_map = CharMap::new(&('a'..='z').collect::<Vec<_>>());
+    let freqs_data = char_map.transform_freqs_data(&freqs_data_raw);
     let layout_cost_cache = Layout::costs();
     loop {
         let mut layout = Layout::init();
@@ -35,21 +37,14 @@ fn main() {
         let mut cost = init_cost;
 
         for cycle in 0.. {
-            let maps = {
-                let mut maps: Vec<(Char, Chord)> =
-                    layout.0.iter().map(|(&c, ch)| (c, ch.clone())).collect();
-                maps.sort_by_key(|p| if matches!(p.0, Char::Char(..)) { 0 } else { 1 });
-                maps
-            };
-            let mut new_layouts = (0usize..26).into_par_iter()
+            let mut new_layouts = (0..char_map.len())
                 .flat_map(|i| {
-                    ((i + 1)..Layout::CHORD_NUM_POS).into_par_iter()
+                    ((i + 1)..layout.0.len())
+                        .into_par_iter()
                         .map(|j| {
-                            let mut new_maps = maps.clone();
-                            let old_char = new_maps[i].0;
-                            new_maps[i].0 = new_maps[j].0;
-                            new_maps[j].0 = old_char;
-                            let new_layout = Layout(new_maps.into_iter().collect());
+                            let mut new_layout = layout.0.clone();
+                            new_layout.swap(i, j);
+                            let new_layout = Layout(new_layout);
                             let new_cost = new_layout.total_cost(&freqs_data, &layout_cost_cache);
                             (new_layout, new_cost)
                         })
@@ -68,13 +63,13 @@ fn main() {
         }
         if cost < target {
             println!("cost: {}, ratio: {}", cost, cost / init_cost);
-            layout.print();
+            layout.print(&char_map);
             target = cost;
             lowest_count = 0;
             println!("==============================");
             println!("||  New Target: {}", target);
             println!("==============================");
-            let mesg = format!("cost: {}\n{}", cost, layout.repr_layout());
+            let mesg = format!("cost: {}\n{}", cost, layout.repr_layout(&char_map));
             std::process::Command::new("notify-send")
                 .args(&["keebopt", &mesg, "-u", "critical"])
                 .spawn()
@@ -87,10 +82,10 @@ fn main() {
                 .spawn()
                 .unwrap();
         }
-        if lowest_count > 2 {
-            // We've hit it more than 3 times
+        if lowest_count > 1 {
+            // We've hit it more than 2 times
             println!("cost: {}, ratio: {}", cost, cost / init_cost);
-            layout.print();
+            layout.print(&char_map);
             break;
         }
     }
