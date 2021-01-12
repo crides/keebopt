@@ -10,7 +10,7 @@ pub struct Layout(pub Vec<Chord>);
 
 pub struct CharMap(pub BTreeMap<char, usize>);
 
-type ChordStore = SmallVec<[u8; 4]>;
+type ChordStore = SmallVec<[u8; 2]>;
 
 #[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct Chord(pub ChordStore);
@@ -40,8 +40,65 @@ impl CharMap {
 }
 
 impl Layout {
-    pub const KEYS_COST: &'static [f64] = &[1.0, 1.1, 1.4, 2.3, 1.0, 1.1, 1.4, 2.3];
+    pub const KEYS_COST: &'static [f64] = &[
+        1.0,
+        1.1,
+        1.4,
+        2.3,
+        1.0 * 1.2,
+        1.1 * 1.2,
+        1.4 * 1.2,
+        2.3 * 1.2,
+    ];
     pub const KEYS_NUM: usize = Layout::KEYS_COST.len();
+
+    fn _chord_cost(chord: &Chord) -> f64 {
+        if chord.0.len() == 1 {
+            Layout::cost(chord.0[0])
+        } else {
+            let (big, small) = if chord.0[0] > chord.0[1] {
+                (chord.0[0], chord.0[1])
+            } else {
+                (chord.0[1], chord.0[0])
+            };
+            let mut cost = Layout::cost(big) + Layout::cost(small);
+            if big == small + 4 {
+                cost *= 1.6;
+            }
+            if big >= 4 && small >= 4 || big < 4 && small < 4 {
+            } else {
+                cost *= 1.1;
+            }
+            if (big == 5 || big == 7) && (small == 1 || small == 3) {
+                cost *= 1.2;
+            }
+            if small == 0 && big == 5 || big == 5 && small == 2 || big == 6 && small == 3 {
+                cost *= 1.9;
+            }
+            cost
+        }
+    }
+
+    fn consec_cost(old: &Chord, new: &Chord) -> f64 {
+        let mut cost = 0.0;
+        for l in &old.0 {
+            for c in &new.0 {
+                let (small, big) = if c < l { (*c, *l) } else { (*l, *c) };
+                if small == big {
+                    cost += 0.6 * Layout::cost(small);
+                } else if small + 4 == big {
+                    cost += 2.0 * Layout::cost(small);
+                }
+            }
+        }
+        match (old.0.len(), new.0.len()) {
+            (1, 1) => (),
+            (1, 2) | (2, 1) => cost *= 1.4,
+            (2, 2) => cost *= 1.8,
+            _ => unreachable!(),
+        }
+        cost
+    }
 
     pub fn costs() -> CostCache {
         let mut costs = [[0.0; Layout::KEYS_NUM]; Layout::KEYS_NUM];
@@ -75,53 +132,12 @@ impl Layout {
         Layout::KEYS_COST[finger as usize]
     }
 
-    fn _chord_cost(chord: &Chord) -> f64 {
-        if chord.0.len() == 1 {
-            Layout::cost(chord.0[0])
-        } else {
-            let (big, small) = if chord.0[0] > chord.0[1] {
-                (chord.0[0], chord.0[1])
-            } else {
-                (chord.0[1], chord.0[0])
-            };
-            let (a, b) = (Layout::cost(big), Layout::cost(small));
-            (a + b)
-                * if big == small + 4 {
-                    1.5
-                } else if big >= 4 && small >= 4 || big < 4 && small < 4 {
-                    1.0
-                } else if small == 0 && big == 5 || big == 5 && small == 2 || big == 6 && small == 3
-                {
-                    1.9
-                } else {
-                    1.3
-                }
-        }
-    }
-
     fn chord_cost(chord: &Chord, costs: &CostCache) -> f64 {
         if chord.0.len() == 1 {
             Layout::cost(chord.0[0])
         } else {
             costs[chord.0[0] as usize][chord.0[1] as usize]
         }
-    }
-
-    fn consec_cost(old: &Chord, new: &Chord) -> f64 {
-        let mut cost = 0.0;
-        for l in &old.0 {
-            for c in &new.0 {
-                let (small, big) = if c < l { (*c, *l) } else { (*l, *c) };
-                cost += if small == big {
-                    Layout::cost(small)
-                } else if small + 4 == big {
-                    2.0 * Layout::cost(small)
-                } else {
-                    0.0
-                }
-            }
-        }
-        cost
     }
 
     pub fn total_cost(&self, data: &FreqsData, costs: &CostCache) -> f64 {
