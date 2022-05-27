@@ -3,12 +3,19 @@ mod layout;
 
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::borrow::Cow;
+
+use clap::{App, Arg};
 
 use layout::{CharMap, Layout};
 
 fn main() {
+    let matches = App::new("keebopt")
+        .arg(Arg::with_name("data").long("data"))
+        .get_matches();
+    let data = matches.value_of("data").map(|s| Cow::Owned(std::fs::read_to_string(s).unwrap())).unwrap_or(Cow::Borrowed(include_str!("../ngram2.json")));
     let freqs_data_raw: BTreeMap<String, usize> =
-        serde_json::from_str::<BTreeMap<String, usize>>(include_str!("../ngram2.json"))
+        serde_json::from_str::<BTreeMap<String, usize>>(data.as_ref())
             .unwrap()
             .into_iter()
             .collect();
@@ -21,7 +28,7 @@ fn main() {
         let mut layout = Layout::init();
         let mut cost = layout.total_cost(&freqs_data, &layout_cost_cache);
 
-        for cycle in 0.. {
+        for _cycle in 0.. {
             let mut new_layouts = (0..char_map.len())
                 .flat_map(|i| {
                     ((i + 1)..layout.0.len())

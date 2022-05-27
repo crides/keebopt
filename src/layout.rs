@@ -1,7 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use rand::prelude::*;
 use smallvec::{smallvec, SmallVec};
+use lazy_static::lazy_static;
 
 pub type FreqsData = Vec<(Vec<usize>, usize)>;
 
@@ -39,16 +40,99 @@ impl CharMap {
     }
 }
 
+struct Key {
+    cost: f32,
+    id: u8,
+}
+
+struct Finger {
+    base_cost: f32,
+    keys: Vec<Key>,
+}
+
+struct PhysicalLayout {
+    fingers: Vec<Finger>,
+}
+
+lazy_static! {
+    static ref PHYS_LAYOUT: PhysicalLayout = PhysicalLayout {
+        fingers: vec![
+            Finger {
+                base_cost: 1.0,
+                keys: vec![
+                    Key {
+                        cost: 1.1,
+                        id: 0,
+                    },
+                    Key {
+                        cost: 1.3,
+                        id: 4,
+                    },
+                ],
+            },
+            Finger {
+                base_cost: 1.1,
+                keys: vec![
+                    Key {
+                        cost: 1.2,
+                        id: 1,
+                    },
+                    Key {
+                        cost: 1.0,
+                        id: 5,
+                    },
+                    Key {
+                        cost: 1.5,
+                        id: 8,
+                    },
+                ],
+            },
+            Finger {
+                base_cost: 1.4,
+                keys: vec![
+                    Key {
+                        cost: 1.2,
+                        id: 2,
+                    },
+                    Key {
+                        cost: 1.0,
+                        id: 6,
+                    },
+                    Key {
+                        cost: 1.5,
+                        id: 9,
+                    },
+                ],
+            },
+            Finger {
+                base_cost: 2.3,
+                keys: vec![
+                    Key {
+                        cost: 1.2,
+                        id: 3,
+                    },
+                    Key {
+                        cost: 1.4,
+                        id: 7,
+                    },
+                ],
+            },
+        ],
+    };
+}
+
 impl Layout {
     pub const KEYS_COST: &'static [f64] = &[
         1.0,
-        1.1,
-        1.4,
-        2.3,
-        1.0 * 1.2,
         1.1 * 1.2,
         1.4 * 1.2,
+        2.3,
+        1.0 * 1.2,
+        1.1,
+        1.4,
         2.3 * 1.2,
+        1.1 * 1.5,
+        1.4 * 1.5,
     ];
     pub const KEYS_NUM: usize = Layout::KEYS_COST.len();
 
@@ -62,17 +146,17 @@ impl Layout {
                 (chord.0[1], chord.0[0])
             };
             let mut cost = Layout::cost(big) + Layout::cost(small);
-            if big == small + 4 {
+            if matches!((small, big), (0, 4) | (1, 5) | (2, 6) | (3, 7) | (5, 8) | (6, 9)) {
                 cost *= 1.6;
             }
-            if big >= 4 && small >= 4 || big < 4 && small < 4 {
-            } else {
-                cost *= 1.1;
-            }
-            if (big == 5 || big == 7) && (small == 1 || small == 3) {
+            // if big >= 4 && small >= 4 || big < 4 && small < 4 {
+            // } else {
+            //     cost *= 1.1;
+            // }
+            if matches!((small, big), (5, 7) | (1, 3)) {
                 cost *= 1.2;
             }
-            if small == 0 && big == 5 || big == 5 && small == 2 || big == 6 && small == 3 {
+            if matches!((small, big), (0, 5) | (2, 5) | (3, 6) | (0, 8) | (2, 8) | (3, 9)) {
                 cost *= 1.9;
             }
             cost
@@ -115,13 +199,21 @@ impl Layout {
     }
 
     pub fn init() -> Layout {
+        let fingers = vec![vec![0, 4], vec![1, 5, 8], vec![2, 6, 9], vec![3, 7]];
+        let f = &fingers;
         let mut layout: Vec<_> = (0..Layout::KEYS_NUM)
             .map(|i| smallvec![i as u8])
-            .chain((0..Layout::KEYS_NUM).flat_map(|i| {
-                ((i + 1)..Layout::KEYS_NUM)
-                    .map(|j| smallvec![i as u8, j as u8])
-                    .collect::<Vec<_>>()
+            .chain((0..(fingers.len())).flat_map(move |i| {
+                ((i+1)..f.len()).flat_map(move |j| {
+                    let (a, b) = (&f[i], &f[j]);
+                    (0..a.len()).flat_map(move |m| {
+                        (0..b.len()).map(move |n| {
+                            smallvec![a[m] as u8, b[n] as u8]
+                        })
+                    })
+                })
             }))
+            .chain([(0, 4), (1, 5), (5, 8), (2, 6), (6, 9), (3, 7)].iter().map(|&(a, b)| smallvec![a, b]))
             .map(Chord)
             .collect();
         layout.shuffle(&mut thread_rng());
@@ -160,56 +252,23 @@ impl Layout {
         cost
     }
 
-    fn repr_chord(chord: &Chord) -> String {
-        let keys: BTreeSet<u8> = chord.0.iter().copied().collect();
-        [(0, 4), (1, 5), (2, 6), (3, 7)]
-            .iter()
-            .map(|(top, bottom)| {
-                let dyad = (keys.contains(top), keys.contains(bottom));
-                match dyad {
-                    (false, false) => " ",
-                    (false, true) => "▄",
-                    (true, false) => "▀",
-                    (true, true) => "█",
-                }
-            })
-            .collect()
-    }
-
-    fn repr_mapping(chord: &Chord, c: char) -> String {
-        format!("|{}|: {}", Layout::repr_chord(chord), c)
-    }
-
-    pub fn repr_layout(&self, char_map: &CharMap) -> String {
+    pub fn print(&self, char_map: &CharMap) {
         let rev_char_map: BTreeMap<usize, char> =
             char_map.0.iter().map(|(&c, &i)| (i, c)).collect();
         let char_num = rev_char_map.len();
-        let mut maps: Vec<(Chord, char)> = self
+        self
             .0
             .iter()
             .enumerate()
             .filter(|(i, _)| *i < char_num)
-            .map(|(i, c)| (c.clone(), rev_char_map[&i]))
-            .collect();
-        maps.sort_by_key(|e| {
-            (
-                if e.0 .0.len() > 1 { 1 } else { 0 },
-                e.0 .0.iter().copied().max().unwrap(),
-            )
-        });
-        maps.chunks(Layout::KEYS_NUM)
-            .map(|chunk| {
-                let reprs = chunk
-                    .iter()
-                    .map(|p| Layout::repr_mapping(&p.0, p.1))
-                    .collect::<Vec<_>>();
-                reprs.join(", ")
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+            .for_each(|(i, c)| {
+                let target = rev_char_map[&i];
+                if c.0.len() == 1 {
+                    println!("{}: {}", i, target);
+                } else {
+                    println!("combo_{a}{b} {{ timeout-ms = <75>; key-positions = <{a} {b}>; bindings = <&kp {target}>; }};", a = c.0[0] + 1, b = c.0[1] + 1, target = target.to_uppercase());
+                }
+            });
 
-    pub fn print(&self, char_map: &CharMap) {
-        println!("{}", self.repr_layout(char_map));
     }
 }
