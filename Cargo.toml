@@ -2,7 +2,7 @@
 name = "keebopt"
 version = "0.1.0"
 authors = ["crides <zhuhaoqing@live.cn>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,8 +10,7 @@ edition = "2018"
 serde = "*"
 serde_derive = "*"
 serde_json = "*"
+serde_yaml = "*"
 rand = "*"
-smallvec = "*"
-clap = "*"
-lazy_static = "*"
-# rayon = "*"
+clap = { version = "3.0", features = ["cargo"] }
+rayon = "*"
