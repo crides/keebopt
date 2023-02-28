@@ -35,7 +35,7 @@ fn main() {
         serde_yaml::from_reader(File::open(matches.value_of("layout").unwrap()).unwrap()).unwrap();
     match matches.subcommand().unwrap() {
         ("opt", m) => {
-            let res = optimize(&phys, chars, &freqs_data_raw);
+            let res = optimize(&phys, &chars, &freqs_data_raw);
             if let Some(output) = m.value_of("output") {
                 let out = File::create(output).unwrap();
                 serde_json::to_writer_pretty(out, &res).unwrap();
