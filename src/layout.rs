@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 pub const CHORDS_IN_LINE: usize = 8;
 
+pub type RawFreqsData = Vec<(Vec<String>, usize)>;
 pub type FreqsData = Vec<(Vec<Chord>, usize)>;
 pub type Key = (u8, u8);
 
@@ -54,11 +55,11 @@ impl CharMap {
         )
     }
 
-    pub fn transform_freqs_data(&self, data: &BTreeMap<String, usize>) -> FreqsData {
+    pub fn transform_freqs_data(&self, data: &RawFreqsData) -> FreqsData {
         data.iter()
             .map(|(k, v)| {
                 (
-                    k.chars().map(|c| self.0[&c.to_ascii_lowercase()]).collect(),
+                    k.iter().map(|c| self.0[&c.chars().next().unwrap().to_ascii_lowercase()]).collect(),
                     *v,
                 )
             })
@@ -67,7 +68,7 @@ impl CharMap {
 
     pub fn cost(
         &self,
-        data: &BTreeMap<String, usize>,
+        data: &RawFreqsData,
         phys: &PhysicalLayout,
         costs: &CostCache,
     ) -> f64 {
@@ -213,11 +214,12 @@ impl<'p> Layout<'p> {
         }
         for (i, fst) in inds.iter().enumerate() {
             for snd in &inds[i + 1..] {
-                if fst.0 != snd.0 {
+                if fst.0 != snd.0 || fst.1.abs_diff(snd.1) == 1 {
                     chords.push(Chord::Chord(*fst, *snd));
                 }
             }
         }
+        dbg!(chords.len());
         Layout { chords, phys }
     }
 
@@ -281,17 +283,19 @@ impl<'p> Layout<'p> {
 pub fn optimize(
     phys: &PhysicalLayout,
     chars: &[char],
-    freqs_data: &BTreeMap<String, usize>,
+    freqs_data: &RawFreqsData,
+    rounds: usize,
 ) -> CharMap {
     let costs_cache = phys.costs_cache();
     let layout = Layout::new(&phys);
-    let (best, best_cost) = (0..20_000).into_par_iter().map(|_| {
-        print!(".");
+    let (best, best_cost) = (0..rounds).into_par_iter().map(|_| {
+        print!("+");
         std::io::stdout().flush().unwrap();
         let mut chars: Vec<char> = chars.to_vec();
         chars.shuffle(&mut thread_rng());
         let mut char_map = CharMap::new(&layout, &chars);
         let mut cost = char_map.cost(freqs_data, &phys, &costs_cache);
+        let mut i = 0;
         loop {
             let best = (0..layout.chords.len())
                 .flat_map(|li| (0..char_map.0.len()).map(|j| (li, j)).collect::<Vec<_>>())
@@ -317,9 +321,14 @@ pub fn optimize(
                     (char_map, cost) = best;
                 }
                 Ordering::Greater | Ordering::Equal => {
+                    print!("{}-", i);
+                    std::io::stdout().flush().unwrap();
                     return (char_map, cost)
                 }
             }
+            i += 1;
+            // print!(".");
+            // std::io::stdout().flush().unwrap();
         }
     }).min_by(|(_m1, c1), (_m2, c2)| c1.total_cmp(c2)).unwrap();
     println!("\ncost: {}", best_cost);
