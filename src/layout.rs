@@ -9,8 +9,7 @@ use rayon::prelude::*;
 
 pub const CHORDS_IN_LINE: usize = 8;
 
-pub type RawFreqsData = Vec<(Vec<String>, usize)>;
-pub type FreqsData = Vec<(Vec<Chord>, usize)>;
+pub type RawFreqsData = Vec<(String, usize)>;
 pub type Key = (u8, u8);
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,52 +38,35 @@ impl std::fmt::Display for Chord {
     }
 }
 
+pub const PRINTABLE_LEN: usize = 95;
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CharMap(pub BTreeMap<char, Chord>);
+pub struct CharMap(pub Vec<Option<Chord>>);
 
 pub type CostCache = Vec<Vec<f64>>;
 
 impl CharMap {
     pub fn new(layout: &Layout, chars: &[char]) -> CharMap {
-        CharMap(
-            chars
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (*c, layout.chords[i]))
-                .collect(),
-        )
+        let mut map = vec![None; PRINTABLE_LEN];
+        for (i, c) in chars.iter().enumerate() {
+            map[*c as usize - ' ' as usize] = Some(layout.chords[i]);
+        }
+        CharMap(map)
     }
 
-    pub fn transform_freqs_data(&self, data: &RawFreqsData) -> FreqsData {
-        data.iter()
-            .map(|(k, v)| {
-                (
-                    k.iter().map(|c| self.0[&c.chars().next().unwrap().to_ascii_lowercase()]).collect(),
-                    *v,
-                )
-            })
-            .collect()
+    pub fn cost(&self, data: &RawFreqsData, phys: &PhysicalLayout, costs: &CostCache) -> f64 {
+        phys.total_cost(self, data, costs)
     }
 
-    pub fn cost(
-        &self,
-        data: &RawFreqsData,
-        phys: &PhysicalLayout,
-        costs: &CostCache,
-    ) -> f64 {
-        let freqs_data = self.transform_freqs_data(&data);
-        phys.total_cost(&freqs_data, &costs)
-    }
-
+    /// No dups
     pub fn is_valid(&self) -> bool {
-        self.0.len() == self.0.values().collect::<BTreeSet<_>>().len()
+        self.0.iter().collect::<BTreeSet<_>>().len() == self.0.iter().map(|c| c.is_some()).len()
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Finger {
-    base: f32,
-    keys: Vec<f32>,
+    base: f64,
+    keys: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,7 +93,7 @@ impl PhysicalLayout {
 
     pub fn cost(&self, key: Key) -> f64 {
         let finger = &self.fingers[key.0 as usize];
-        finger.keys[key.1 as usize] as f64 * finger.base as f64
+        finger.keys[key.1 as usize] * finger.base
     }
 
     pub fn costs_cache(&self) -> CostCache {
@@ -179,18 +161,21 @@ impl PhysicalLayout {
         }
     }
 
-    pub fn total_cost(&self, data: &FreqsData, costs: &CostCache) -> f64 {
+    pub fn total_cost(&self, map: &CharMap, data: &RawFreqsData, costs: &CostCache) -> f64 {
         let mut cost = 0.0f64;
         for (s, count) in data.iter() {
             cost += (*count as f64) * {
                 let mut cost = 0.0;
-                let mut last_chord: Option<Chord> = None;
-                for &c in s {
-                    cost += self.chord_cost_cached(&c, costs);
+                let mut last_chord: Option<&Chord> = None;
+                for c in s.as_bytes() {
+                    let chord = map.0[*c as usize - ' ' as usize]
+                        .as_ref()
+                        .unwrap();
+                    cost += self.chord_cost_cached(chord, costs);
                     if let Some(last) = &last_chord {
-                        cost += self.consec_cost(last, &c);
+                        cost += self.consec_cost(last, chord);
                     }
-                    last_chord = Some(c);
+                    last_chord = Some(chord);
                 }
                 cost
             };
@@ -225,15 +210,24 @@ impl<'p> Layout<'p> {
 
     pub fn print(&self, char_map: &CharMap) {
         let mut key_map = vec![vec![' '; self.phys.fingers[0].keys.len()]; self.phys.fingers.len()];
-        for (&c, &chord) in char_map.0.iter() {
-            if let Chord::Key((i, j)) = chord {
-                key_map[i as usize][j as usize] = c;
+        for (i, chord) in char_map.0.iter().enumerate() {
+            let c = (i as u8 + ' ' as u8) as char;
+            if let Some(Chord::Key((i, j))) = chord {
+                key_map[*i as usize][*j as usize] = c;
             }
         }
         let mut chord_map: Vec<_> = char_map
             .0
             .iter()
-            .filter(|(_c, chord)| matches!(chord, Chord::Chord(..)))
+            .enumerate()
+            .filter_map(|(i, chord)| {
+                if let Some(chord) = chord {
+                    Some(((i as u8 + ' ' as u8) as char, chord))
+                } else {
+                    None
+                }
+            })
+            .filter(|(_i, chord)| matches!(chord, Chord::Chord(..)))
             .collect();
         chord_map.sort_by_key(|(_, c)| match c {
             Chord::Chord(k1, k2) => (k1.0.abs_diff(k2.0), k1.1.abs_diff(k2.1)),
@@ -288,50 +282,67 @@ pub fn optimize(
 ) -> CharMap {
     let costs_cache = phys.costs_cache();
     let layout = Layout::new(&phys);
-    let (best, best_cost) = (0..rounds).into_par_iter().map(|_| {
-        print!("+");
-        std::io::stdout().flush().unwrap();
-        let mut chars: Vec<char> = chars.to_vec();
-        chars.shuffle(&mut thread_rng());
-        let mut char_map = CharMap::new(&layout, &chars);
-        let mut cost = char_map.cost(freqs_data, &phys, &costs_cache);
-        let mut i = 0;
-        loop {
-            let best = (0..layout.chords.len())
-                .flat_map(|li| (0..char_map.0.len()).map(|j| (li, j)).collect::<Vec<_>>())
-                .map(|(li, mi)| {
-                    let mut new_char_map = char_map.clone();
-                    let (lc, mc) = (layout.chords[li], new_char_map.0[&chars[mi]]);
-                    if let Some(key) =
-                        new_char_map
-                            .0
-                            .iter()
-                            .find_map(|(key, c)| if *c == lc { Some(*key) } else { None })
-                    {
-                        new_char_map.0.insert(key, mc);
+    let results = (0..rounds)
+        .into_par_iter()
+        .map(|_| {
+            print!("+");
+            std::io::stdout().flush().unwrap();
+            let mut chars: Vec<char> = chars.to_vec();
+            chars.shuffle(&mut thread_rng());
+            let mut char_map = CharMap::new(&layout, &chars);
+            let mut cost = char_map.cost(freqs_data, &phys, &costs_cache);
+            let mut i = 0;
+            loop {
+                let rev_char_map: BTreeMap<Chord, usize> = char_map
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| {
+                        if let Some(chord) = c {
+                            Some((*chord, i))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let best = (0..layout.chords.len())
+                    .flat_map(|li| (0..chars.len()).map(|i| (li, i)).collect::<Vec<_>>())
+                    .map(|(li, ci)| {
+                        let mut new_char_map = char_map.clone();
+                        let (lc, mc) = (
+                            layout.chords[li],
+                            new_char_map.0[chars[ci] as usize - ' ' as usize],
+                        );
+                        if let Some(i) = rev_char_map.get(&lc) {
+                            new_char_map.0[*i] = mc;
+                        }
+                        new_char_map.0[chars[ci] as usize - ' ' as usize] = Some(lc);
+                        let new_cost = new_char_map.cost(freqs_data, &phys, &costs_cache);
+                        (new_char_map, new_cost)
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .unwrap();
+                match best.1.partial_cmp(&cost).unwrap() {
+                    Ordering::Less => {
+                        (char_map, cost) = best;
                     }
-                    new_char_map.0.insert(chars[mi], lc);
-                    let new_cost = new_char_map.cost(freqs_data, &phys, &costs_cache);
-                    (new_char_map, new_cost)
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap();
-            match best.1.partial_cmp(&cost).unwrap() {
-                Ordering::Less => {
-                    (char_map, cost) = best;
+                    Ordering::Greater | Ordering::Equal => {
+                        print!("{}-", i);
+                        std::io::stdout().flush().unwrap();
+                        return (char_map, cost, i);
+                    }
                 }
-                Ordering::Greater | Ordering::Equal => {
-                    print!("{}-", i);
-                    std::io::stdout().flush().unwrap();
-                    return (char_map, cost)
-                }
+                i += 1;
+                print!(".");
+                std::io::stdout().flush().unwrap();
             }
-            i += 1;
-            // print!(".");
-            // std::io::stdout().flush().unwrap();
-        }
-    }).min_by(|(_m1, c1), (_m2, c2)| c1.total_cmp(c2)).unwrap();
-    println!("\ncost: {}", best_cost);
+        })
+        .collect::<Vec<_>>();
+    let total_steps: u64 = results.iter().map(|(_, _, step)| step).sum();
+    let (best, best_cost, _) = results.into_iter().min_by(|(_m1, c1, _), (_m2, c2, _)| c1.total_cmp(c2)).unwrap();
+    let total_char_count: usize = freqs_data.iter().map(|(s, c)| s.len() * c).sum();
+    println!("\nsteps: {}", total_steps);
+    println!("cost: {}", best_cost / total_char_count as f64);
     layout.print(&best);
     return best;
 }

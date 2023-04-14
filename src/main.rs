@@ -26,7 +26,7 @@ fn main() {
         .map(|s| Cow::Owned(std::fs::read_to_string(s).unwrap()))
         .unwrap_or(Cow::Borrowed(include_str!("../grams.json")));
     let freqs_data_raw: RawFreqsData = serde_json::from_str(data.as_ref()).unwrap();
-    let chars: Vec<char> = freqs_data_raw.iter().flat_map(|(v, _)| v.iter().map(|s| s.chars().next().unwrap())).collect::<BTreeSet<char>>().into_iter().collect();
+    let chars: Vec<char> = freqs_data_raw.iter().flat_map(|(v, _)| v.chars().collect::<Vec<_>>()).collect::<BTreeSet<char>>().into_iter().collect();
     println!("chars: len: {}, {:?}", chars.len(), chars);
     let phys: PhysicalLayout =
         serde_yaml::from_reader(File::open(matches.value_of("layout").unwrap()).unwrap()).unwrap();
