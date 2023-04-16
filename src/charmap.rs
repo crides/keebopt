@@ -4,6 +4,9 @@ use std::ops::{Index, IndexMut};
 #[derive(Clone, Debug)]
 pub struct FlatCharMap<T>(Vec<Option<T>>);
 
+#[derive(Clone, Debug)]
+pub struct RawFlatCharMap<T>(Vec<T>);
+
 #[inline]
 fn clamp_ind(index: usize) -> usize {
     assert!(index > FlatCharMap::<()>::OFFSET as usize, "index: {}", index);
@@ -59,6 +62,34 @@ impl<T: Sized + Clone> FlatCharMap<T> {
     }
 }
 
+impl<T: Sized + Clone + Default> RawFlatCharMap<T> {
+    pub fn new() -> Self {
+        Self(vec![Default::default(); FlatCharMap::<()>::CAP])
+    }
+}
+
+impl<T: Sized + Clone> RawFlatCharMap<T> {
+    fn index(&self, index: usize) -> &T {
+        &self.0[clamp_ind(index)]
+    }
+
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        &mut self.0[clamp_ind(index)]
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = char> {
+        (0..self.0.len()).map(ind2char)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (char, &T)> {
+        self.0.iter().enumerate().map(|(i, v)| (ind2char(i), v))
+    }
+}
+
 macro_rules! impl_index {
     ($ty:ident) => {
 impl<T: Sized + Clone> Index<$ty> for FlatCharMap<T> {
@@ -73,9 +104,21 @@ impl<T: Sized + Clone> IndexMut<$ty> for FlatCharMap<T> {
         self.index_mut(index as usize)
     }
 }
+
+impl<T: Sized + Clone> Index<$ty> for RawFlatCharMap<T> {
+    type Output = T;
+    fn index(&self, index: $ty) -> &Self::Output {
+        self.index(index as usize)
+    }
+}
+
+impl<T: Sized + Clone> IndexMut<$ty> for RawFlatCharMap<T> {
+    fn index_mut(&mut self, index: $ty) -> &mut Self::Output {
+        self.index_mut(index as usize)
+    }
+}
     };
 }
 
 impl_index!(char);
 impl_index!(usize);
-impl_index!(u8);

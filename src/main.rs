@@ -10,7 +10,7 @@ use std::fs::File;
 
 use clap::{arg, command, Command};
 
-use layout::{PhysicalLayout, Layout, RawFreqsData};
+use layout::{PhysicalLayout, Layout, RawFreqData};
 
 use self::layout::{optimize, CharMap};
 
@@ -20,13 +20,13 @@ fn main() {
         .arg(arg!(--data[data]))
         .arg(arg!(--layout <layout>))
         .subcommand(Command::new("opt").arg(arg!(--output <output>)).arg(arg!(--rounds [rounds])))
-        .subcommand(Command::new("test").arg(arg!(--map <map>)))
+        .subcommand(Command::new("test"))
         .get_matches();
     let data = matches
         .value_of("data")
         .map(|s| Cow::Owned(std::fs::read_to_string(s).unwrap()))
         .unwrap_or(Cow::Borrowed(include_str!("../grams.json")));
-    let freqs_data_raw: RawFreqsData = serde_json::from_str(data.as_ref()).unwrap();
+    let freqs_data_raw: RawFreqData = serde_json::from_str(data.as_ref()).unwrap();
     let chars: Vec<char> = freqs_data_raw.iter().flat_map(|(v, _)| v.chars().collect::<Vec<_>>()).collect::<BTreeSet<char>>().into_iter().collect();
     println!("chars: len: {}, {:?}", chars.len(), chars);
     let mut phys: PhysicalLayout =
@@ -40,15 +40,16 @@ fn main() {
             //     serde_json::to_writer_pretty(out, &res).unwrap();
             // }
         }
-        // ("test", m) => {
-        //     let map: CharMap =
-        //         serde_json::from_reader(File::open(m.value_of("map").unwrap()).unwrap()).unwrap();
-        //     let costs = phys.costs_cache();
-        //     let layout = Layout::new(&phys);
-        //     println!("valid: {}", map.is_valid());
-        //     layout.print(&map);
-        //     println!("cost: {}", map.cost(&freqs_data_raw, &phys, &costs));
-        // }
+        ("test", m) => {
+            layout::test(&phys, &chars, &freqs_data_raw);
+            // let map: CharMap =
+            //     serde_json::from_reader(File::open(m.value_of("map").unwrap()).unwrap()).unwrap();
+            // let costs = phys.costs_cache();
+            // let layout = Layout::new(&phys);
+            // println!("valid: {}", map.is_valid());
+            // layout.print(&map);
+            // println!("cost: {}", map.cost(&freqs_data_raw, &phys, &costs));
+        }
         _ => unreachable!(),
     }
 }

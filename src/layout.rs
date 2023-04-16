@@ -7,12 +7,26 @@ use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
 
-use crate::charmap::FlatCharMap;
+use crate::charmap::{FlatCharMap, RawFlatCharMap};
 
 pub const CHORDS_IN_LINE: usize = 8;
 
-pub type RawFreqsData = Vec<(String, usize)>;
+pub type FreqDataItem = (String, usize);
+pub type RawFreqData = Vec<FreqDataItem>;
+pub type FreqData = BTreeMap<char, Vec<FreqDataItem>>;
 pub type Key = (u8, u8);
+
+fn to_freq_data(raw: &RawFreqData) -> FreqData {
+    let mut map = BTreeMap::new();
+    for (s, cnt) in raw.into_iter() {
+        let mut deduped = s.chars().collect::<Vec<_>>();    // FIXME opt
+        deduped.dedup();
+        for c in deduped.into_iter() {
+            map.entry(c).and_modify(|a: &mut Vec<_>| a.push((s.clone(), *cnt))).or_insert_with(|| vec![(s.clone(), *cnt)]);
+        }
+    }
+    map
+}
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Chord {
@@ -54,14 +68,15 @@ impl CharMap {
         CharMap(map)
     }
 
-    pub fn cost(&self, data: &RawFreqsData, phys: &PhysicalLayout) -> f64 {
-        phys.total_cost(self, data)
-    }
-
     /// No dups
     pub fn is_valid(&self) -> bool {
         self.0.iter().collect::<BTreeSet<_>>().len() == self.0.iter().count()
     }
+}
+
+struct LayoutScore {
+    chars: RawFlatCharMap<f64>,
+    total: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,26 +190,48 @@ impl PhysicalLayout {
         }
     }
 
-    pub fn total_cost(&self, map: &CharMap, data: &RawFreqsData) -> f64 {
-        let mut cost = 0.0f64;
-        for (s, count) in data.iter() {
-            cost += (*count as f64) * {
-                let mut cost = 0.0;
-                let mut last_chord: Option<&Chord> = None;
-                for c in s.as_bytes() {
-                    let chord = &map.0[*c];
-                    cost += self.chord_cost_cached(chord);
-                    if let Some(last) = &last_chord {
-                        cost += self.consec_cost(last, chord);
-                    }
-                    last_chord = Some(chord);
-                    coz::progress!();
+    fn freq_item_cost(&self, map: &CharMap, s: &str, c: usize) -> f64 {
+        (c as f64) * {
+            let mut cost = 0.0;
+            let mut last_chord: Option<&Chord> = None;
+            for c in s.chars() {
+                let chord = &map.0[c];
+                cost += self.chord_cost_cached(chord);
+                if let Some(last) = &last_chord {
+                    cost += self.consec_cost(last, chord);
                 }
-                cost
-            };
+                last_chord = Some(chord);
+                coz::progress!();
+            }
+            cost
+        }
+    }
+
+    pub fn total_cost(&self, map: &CharMap, data: &RawFreqData) -> f64 {
+        data.iter().map(|(s, c)| self.freq_item_cost(map, s, *c)).sum()
+    }
+
+    pub fn layout_cost(&self, map: &CharMap, data: &RawFreqData) -> LayoutScore {
+        let mut scores = RawFlatCharMap::new();
+        let mut total = 0.0;
+        // let mut bang_count = 0;
+        for (s, count) in data.iter() {
+            let score = self.freq_item_cost(map, s, *count);
+            // println!("{}, {}", s, score);
+            let mut deduped = s.chars().collect::<Vec<_>>();    // FIXME opt
+            deduped.dedup();
+            for c in deduped.into_iter() {
+                scores[c] += score;
+                // if c == 'a' {
+                //     bang_count += 1;
+                //     println!("lcost {} -> {}", s, score);
+                // }
+            }
+            total += score;
             coz::progress!();
         }
-        cost
+        // println!("bang count {}", bang_count);
+        LayoutScore { total, chars: scores }
     }
 }
 
@@ -246,55 +283,187 @@ impl<'p> Layout<'p> {
                 println!("");
             }
             println!("");
-            for i in (0..chord_map.len()).step_by(CHORDS_IN_LINE) {
-                for row in 0..3 {
-                    for j in 0..(std::cmp::min(CHORDS_IN_LINE, chord_map.len() - i)) {
-                        let ind = i + j;
-                        let keys = chord_map[ind].1.to_keys();
-                        for finger in 0..self.phys.fingers.len() {
-                            print!(
-                                "{}",
-                                if keys
-                                    .iter()
-                                    .find(|k| k.0 == finger as u8 && k.1 == row)
-                                    .is_some()
-                                {
-                                    "#"
-                                } else {
-                                    "."
-                                }
-                            );
-                        }
-                        if row == 1 {
-                            print!(" = {} ", chord_map[ind].0);
-                        } else {
-                            print!("     ");
-                        }
-                    }
-                    println!("");
-                }
-                println!("");
-            }
+            // for i in (0..chord_map.len()).step_by(CHORDS_IN_LINE) {
+            //     for row in 0..3 {
+            //         for j in 0..(std::cmp::min(CHORDS_IN_LINE, chord_map.len() - i)) {
+            //             let ind = i + j;
+            //             let keys = chord_map[ind].1.to_keys();
+            //             for finger in 0..self.phys.fingers.len() {
+            //                 print!(
+            //                     "{}",
+            //                     if keys
+            //                         .iter()
+            //                         .find(|k| k.0 == finger as u8 && k.1 == row)
+            //                         .is_some()
+            //                     {
+            //                         "#"
+            //                     } else {
+            //                         "."
+            //                     }
+            //                 );
+            //             }
+            //             if row == 1 {
+            //                 print!(" = {} ", chord_map[ind].0);
+            //             } else {
+            //                 print!("     ");
+            //             }
+            //         }
+            //         println!("");
+            //     }
+            //     println!("");
+            // }
         }
     }
+}
+
+pub fn test(
+    phys: &PhysicalLayout,
+    chars: &[char],
+    raw_freq_data: &RawFreqData,
+) {
+    let layout = &Layout::new(&phys);
+    let freq_data = to_freq_data(&raw_freq_data);
+    // let char_map = CharMap::new(layout, &chars);
+    let mut char_map = CharMap(FlatCharMap::new());
+    char_map.0.set('!', Chord::Key((0, 0)));
+    char_map.0.set('"', Chord::Key((0, 1)));
+    char_map.0.set('#', Chord::Key((0, 2)));
+    char_map.0.set('$', Chord::Key((1, 0)));
+    char_map.0.set('%', Chord::Key((1, 1)));
+    char_map.0.set('&', Chord::Key((1, 2)));
+    char_map.0.set('\'', Chord::Key((2, 0)));
+    char_map.0.set('(', Chord::Key((2, 1)));
+    char_map.0.set(')', Chord::Key((2, 2)));
+    char_map.0.set('*', Chord::Key((3, 0)));
+    char_map.0.set('+', Chord::Key((3, 1)));
+    char_map.0.set(',', Chord::Key((3, 2)));
+    char_map.0.set('-', Chord::Chord((0, 0), (0, 1)));
+    char_map.0.set('.', Chord::Chord((0, 0), (1, 0)));
+    char_map.0.set('/', Chord::Chord((0, 0), (1, 1)));
+    char_map.0.set('0', Chord::Chord((0, 0), (1, 2)));
+    char_map.0.set('1', Chord::Chord((0, 0), (2, 0)));
+    char_map.0.set('2', Chord::Chord((0, 0), (2, 1)));
+    char_map.0.set('3', Chord::Chord((0, 0), (2, 2)));
+    char_map.0.set('4', Chord::Chord((0, 0), (3, 0)));
+    char_map.0.set('5', Chord::Chord((0, 0), (3, 1)));
+    char_map.0.set('6', Chord::Chord((0, 0), (3, 2)));
+    char_map.0.set('7', Chord::Chord((0, 1), (0, 2)));
+    char_map.0.set('8', Chord::Chord((0, 1), (1, 0)));
+    char_map.0.set('9', Chord::Chord((0, 1), (1, 1)));
+    char_map.0.set(':', Chord::Chord((0, 1), (1, 2)));
+    char_map.0.set(';', Chord::Chord((0, 1), (2, 0)));
+    char_map.0.set('<', Chord::Chord((0, 1), (2, 1)));
+    char_map.0.set('=', Chord::Chord((0, 1), (2, 2)));
+    char_map.0.set('>', Chord::Chord((0, 1), (3, 0)));
+    char_map.0.set('?', Chord::Chord((0, 1), (3, 1)));
+    char_map.0.set('@', Chord::Chord((0, 1), (3, 2)));
+    char_map.0.set('[', Chord::Chord((0, 2), (1, 0)));
+    char_map.0.set('\\', Chord::Chord((0, 2), (1, 1)));
+    char_map.0.set(']', Chord::Chord((0, 2), (1, 2)));
+    char_map.0.set('^', Chord::Chord((0, 2), (2, 0)));
+    char_map.0.set('_', Chord::Chord((0, 2), (2, 1)));
+    char_map.0.set('`', Chord::Chord((0, 2), (2, 2)));
+    char_map.0.set('a', Chord::Chord((0, 2), (3, 0)));
+    char_map.0.set('b', Chord::Chord((0, 2), (3, 1)));
+    char_map.0.set('c', Chord::Chord((0, 2), (3, 2)));
+    char_map.0.set('d', Chord::Chord((1, 0), (1, 1)));
+    char_map.0.set('e', Chord::Chord((1, 0), (2, 0)));
+    char_map.0.set('f', Chord::Chord((1, 0), (2, 1)));
+    char_map.0.set('g', Chord::Chord((1, 0), (2, 2)));
+    char_map.0.set('h', Chord::Chord((1, 0), (3, 0)));
+    char_map.0.set('i', Chord::Chord((1, 0), (3, 1)));
+    char_map.0.set('j', Chord::Chord((1, 0), (3, 2)));
+    char_map.0.set('k', Chord::Chord((1, 1), (1, 2)));
+    char_map.0.set('l', Chord::Chord((1, 1), (2, 0)));
+    char_map.0.set('m', Chord::Chord((1, 1), (2, 1)));
+    char_map.0.set('n', Chord::Chord((1, 1), (2, 2)));
+    char_map.0.set('o', Chord::Chord((1, 1), (3, 0)));
+    char_map.0.set('p', Chord::Chord((1, 1), (3, 1)));
+    char_map.0.set('q', Chord::Chord((1, 1), (3, 2)));
+    char_map.0.set('r', Chord::Chord((1, 2), (2, 0)));
+    char_map.0.set('s', Chord::Chord((1, 2), (2, 1)));
+    char_map.0.set('t', Chord::Chord((1, 2), (2, 2)));
+    char_map.0.set('u', Chord::Chord((1, 2), (3, 0)));
+    char_map.0.set('v', Chord::Chord((1, 2), (3, 1)));
+    char_map.0.set('w', Chord::Chord((1, 2), (3, 2)));
+    char_map.0.set('x', Chord::Chord((2, 0), (2, 1)));
+    char_map.0.set('y', Chord::Chord((2, 0), (3, 0)));
+    char_map.0.set('z', Chord::Chord((2, 0), (3, 1)));
+    char_map.0.set('{', Chord::Chord((2, 0), (3, 2)));
+    char_map.0.set('|', Chord::Chord((2, 1), (2, 2)));
+    char_map.0.set('}', Chord::Chord((2, 1), (3, 0)));
+    char_map.0.set('~', Chord::Chord((2, 1), (3, 1)));
+
+    let cost = phys.layout_cost(&char_map, raw_freq_data);
+    layout.print(&char_map);
+    let rev_char_map: BTreeMap<Chord, char> = char_map
+        .0
+        .iter()
+        .map(|(c, &chord)| (chord, c))
+        .collect();
+    let mut new_char_map = char_map.clone();
+    let cchar = 'x';
+    let (lc, cc) = (
+        Chord::Key((2, 1)),
+        new_char_map.0[cchar],
+    );
+    new_char_map.0[cchar] = lc;
+    let new_cost_rell = if let Some(&lchar) = rev_char_map.get(&lc) {
+        if lchar == cchar {
+            return;
+        }
+        new_char_map.0[lchar] = cc;
+        phys.total_cost(&new_char_map, &freq_data[&lchar]) - phys.total_cost(&char_map, &freq_data[&lchar])
+    } else {
+        0.0
+    };
+
+    let lchar = rev_char_map.get(&lc).copied().unwrap_or(' ');
+    std::fs::write("dbg.json", serde_json::to_string(&vec![
+        freq_data[&cchar].iter().map(|(s, c)| (s, phys.freq_item_cost(&char_map, s, *c))).collect::<Vec<_>>(),
+        freq_data[&lchar].iter().map(|(s, c)| (s, phys.freq_item_cost(&char_map, s, *c))).collect::<Vec<_>>(),
+        freq_data[&cchar].iter().map(|(s, c)| (s, phys.freq_item_cost(&new_char_map, s, *c))).collect::<Vec<_>>(),
+        freq_data[&lchar].iter().map(|(s, c)| (s, phys.freq_item_cost(&new_char_map, s, *c))).collect::<Vec<_>>(),
+    ]).unwrap()).unwrap();
+    dbg!(cost.total);
+    let new_cost_relc = phys.total_cost(&new_char_map, &freq_data[&cchar]) - phys.total_cost(&char_map, &freq_data[&cchar]);
+    coz::progress!();
+    let new_cost = phys.layout_cost(&new_char_map, raw_freq_data);
+    for c in char_map.0.keys() {
+        println!("{} -> {} - {} = {}", c, new_cost.chars[c], cost.chars[c], new_cost.chars[c] - cost.chars[c]);
+    }
+    println!("{} ({}: {}) <=> {} ({}: {}) -> {:.2} <=> {:.2} | {:.2}", cchar, cc, phys.chord_cost_cached(&cc), lchar, lc, phys.chord_cost_cached(&lc), new_cost_relc, new_cost_rell, new_cost.total);
+    println!("{} | {} - {} = {}", new_cost_relc + new_cost_rell, new_cost.total, cost.total, new_cost.total - cost.total);
+    // let both = raw_freq_data.iter().filter(|(s, _c)| s.contains('x') && s.contains('(')).cloned().collect::<Vec<_>>();
+    // println!("both {} | {}", phys.total_cost(&char_map, &both), phys.total_cost(&new_char_map, &both));
 }
 
 pub fn optimize(
     phys: &PhysicalLayout,
     chars: &[char],
-    freqs_data: &RawFreqsData,
+    raw_freq_data: &RawFreqData,
     rounds: usize,
 ) -> CharMap {
     let layout = &Layout::new(&phys);
+    let freq_data = to_freq_data(&raw_freq_data);
+    let mut char_map = CharMap::new(layout, &chars);
+    layout.print(&char_map);
+    // let mut cost = phys.layout_cost(&char_map, raw_freq_data);
+    // println!("orig score: {}", cost.total);
+    // println!("indiv diffs: {:?}", cost.chars.iter().filter_map(|(c, v)| freq_data.get(&c).map(|f| (c, v, phys.total_cost(&char_map, f)))).collect::<Vec<_>>());
+    // println!("! rel {} {}", freq_data[&'!'].len(), freq_data[&'!'].iter().map(|(s, c)| s.as_str()).collect::<Vec<_>>().join(" "));
+    // return char_map;
     let results = (0..rounds)
         .into_par_iter()
         .map(|_| {
             print!("+");
             std::io::stdout().flush().unwrap();
             let mut chars: Vec<char> = chars.to_vec();
-            chars.shuffle(&mut thread_rng());
+            // chars.shuffle(&mut thread_rng());
             let mut char_map = CharMap::new(layout, &chars);
-            let mut cost = char_map.cost(freqs_data, &phys);
+            layout.print(&char_map);
+            let mut cost = phys.layout_cost(&char_map, raw_freq_data);
+            println!("orig score: {}", cost.total);
             let mut i: usize = 0;
             loop {
                 let rev_char_map: BTreeMap<Chord, char> = char_map
@@ -304,26 +473,40 @@ pub fn optimize(
                     .collect();
                 let best = (0..layout.chords.len())
                     .flat_map(|li| (0..chars.len()).map(|i| (li, i)).collect::<Vec<_>>())
-                    .map(|(li, ci)| {
+                    .filter_map(|(li, ci)| {
                         let mut new_char_map = char_map.clone();
-                        let (lc, mc) = (
+                        let cchar = chars[ci];
+                        let (lc, cc) = (
                             layout.chords[li],
-                            new_char_map.0[chars[ci]],
+                            new_char_map.0[cchar],
                         );
-                        if let Some(&c) = rev_char_map.get(&lc) {
-                            new_char_map.0[c] = mc;
-                        }
-                        new_char_map.0[chars[ci]] = lc;
-                        let new_cost = new_char_map.cost(freqs_data, &phys);
+                        new_char_map.0[cchar] = lc;
+                        let new_cost_rell = if let Some(&lchar) = rev_char_map.get(&lc) {
+                            if lchar == cchar {
+                                return None
+                            }
+                            new_char_map.0[lchar] = cc;
+                            phys.total_cost(&new_char_map, &freq_data[&lchar]) - cost.chars[lchar]
+                        } else {
+                            0.0
+                        };
+                        let new_cost_relc = phys.total_cost(&new_char_map, &freq_data[&cchar]) - cost.chars[cchar];
                         coz::progress!();
-                        (new_char_map, new_cost)
+                        let new_cost = phys.layout_cost(&new_char_map, &raw_freq_data);
+                        let lchar = rev_char_map.get(&lc).copied().unwrap_or(' ');
+                        assert!(new_cost_relc + new_cost_rell - (new_cost.total - cost.total) < 0.001, "\n{} ({}: {}) <=> {} ({}: {}) -> {:.2} <=> {:.2} | {:.2}\n{} | {} - {} = {}\n{:?}", cchar, cc, phys.chord_cost_cached(&cc), lchar, lc, phys.chord_cost_cached(&lc), new_cost_relc, new_cost_rell, new_cost.total, new_cost_relc + new_cost_rell, new_cost.total, cost.total, new_cost.total - cost.total, char_map.0.iter().collect::<BTreeMap<char, &Chord>>());
+                        Some((new_char_map, new_cost_rell + new_cost_relc, new_cost, cchar, lchar))
                     })
                     .min_by(|a, b| a.1.total_cmp(&b.1))
                     .unwrap();
+                let best_total = best.2;//phys.layout_cost(&best.0, raw_freq_data);
+                println!("swap {} <=> {} |-> {}, {}, | {}", best.3, best.4, best.1, best_total.total, cost.total);
                 coz::progress!();
-                match best.1.partial_cmp(&cost).unwrap() {
+                // match best_total.total.partial_cmp(&cost.total).unwrap() {
+                match best_total.total.partial_cmp(&cost.total).unwrap() {
                     Ordering::Less => {
-                        (char_map, cost) = best;
+                        char_map = best.0;
+                        cost = best_total;
                     }
                     Ordering::Greater | Ordering::Equal => {
                         print!("{}-", i);
@@ -338,10 +521,10 @@ pub fn optimize(
         })
         .collect::<Vec<_>>();
     let total_steps: usize = results.iter().map(|(_, _, step)| step).sum();
-    let (best, best_cost, _) = results.into_iter().min_by(|(_m1, c1, _), (_m2, c2, _)| c1.total_cmp(c2)).unwrap();
-    let total_char_count: usize = freqs_data.iter().map(|(s, c)| s.len() * c).sum();
+    let (best, best_cost, _) = results.into_iter().min_by(|(_m1, c1, _), (_m2, c2, _)| c1.total.total_cmp(&c2.total)).unwrap();
+    let total_char_count: usize = raw_freq_data.iter().map(|(s, c)| s.len() * c).sum();
     println!("\nsteps: {}", total_steps);
-    println!("cost: {}", best_cost / total_char_count as f64);
+    println!("cost: {}", best_cost.total / total_char_count as f64);
     layout.print(&best);
     return best;
 }
