@@ -5,6 +5,10 @@ authors = ["crides <zhuhaoqing@live.cn>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+lto = true
+codegen-units = 1
+debug = 1
 
 [dependencies]
 serde = "*"
@@ -14,3 +18,5 @@ serde_yaml = "*"
 rand = "*"
 clap = { version = "3.0", features = ["cargo"] }
 rayon = "*"
+coz = "*"
+itertools = "0.10"

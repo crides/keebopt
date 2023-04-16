@@ -2,16 +2,16 @@
 use std::ops::{Index, IndexMut};
 
 #[derive(Clone, Debug)]
-pub struct FlatCharMap<T>(Vec<Option<T>>);
+pub struct CharMap<T>(Vec<Option<T>>);
 
 #[derive(Clone, Debug)]
-pub struct RawFlatCharMap<T>(Vec<T>);
+pub struct RawCharMap<T>(Vec<T>);
 
 #[inline]
 fn clamp_ind(index: usize) -> usize {
-    assert!(index > FlatCharMap::<()>::OFFSET as usize, "index: {}", index);
-    let offed = index - FlatCharMap::<()>::OFFSET as usize;
-    assert!(offed < FlatCharMap::<()>::CAP, "orig: {}, offed: {}", index, offed);
+    assert!(index > CharMap::<()>::OFFSET as usize, "index: {}", index);
+    let offed = index - CharMap::<()>::OFFSET as usize;
+    assert!(offed < CharMap::<()>::CAP, "orig: {}, offed: {}", index, offed);
     offed
 }
 
@@ -22,14 +22,14 @@ fn char2ind(index: char) -> usize {
 
 #[inline]
 fn ind2char(ind: usize) -> char {
-    (ind as u8 + FlatCharMap::<()>::OFFSET as u8) as char
+    (ind as u8 + CharMap::<()>::OFFSET as u8) as char
 }
 
-impl<T: Sized + Clone> FlatCharMap<T> {
+impl<T: Sized + Clone> CharMap<T> {
     pub const CAP: usize = 95;
     pub const OFFSET: char = ' ';
     pub fn new() -> Self {
-        Self(vec![None; FlatCharMap::<()>::CAP])
+        Self(vec![None; CharMap::<()>::CAP])
     }
 
     fn index(&self, index: usize) -> &T {
@@ -62,13 +62,13 @@ impl<T: Sized + Clone> FlatCharMap<T> {
     }
 }
 
-impl<T: Sized + Clone + Default> RawFlatCharMap<T> {
+impl<T: Sized + Clone + Default> RawCharMap<T> {
     pub fn new() -> Self {
-        Self(vec![Default::default(); FlatCharMap::<()>::CAP])
+        Self(vec![Default::default(); CharMap::<()>::CAP])
     }
 }
 
-impl<T: Sized + Clone> RawFlatCharMap<T> {
+impl<T: Sized + Clone> RawCharMap<T> {
     fn index(&self, index: usize) -> &T {
         &self.0[clamp_ind(index)]
     }
@@ -92,31 +92,31 @@ impl<T: Sized + Clone> RawFlatCharMap<T> {
 
 macro_rules! impl_index {
     ($ty:ident) => {
-impl<T: Sized + Clone> Index<$ty> for FlatCharMap<T> {
-    type Output = T;
-    fn index(&self, index: $ty) -> &Self::Output {
-        self.index(index as usize)
-    }
-}
+        impl<T: Sized + Clone> Index<$ty> for CharMap<T> {
+            type Output = T;
+            fn index(&self, index: $ty) -> &Self::Output {
+                self.index(index as usize)
+            }
+        }
 
-impl<T: Sized + Clone> IndexMut<$ty> for FlatCharMap<T> {
-    fn index_mut(&mut self, index: $ty) -> &mut Self::Output {
-        self.index_mut(index as usize)
-    }
-}
+        impl<T: Sized + Clone> IndexMut<$ty> for CharMap<T> {
+            fn index_mut(&mut self, index: $ty) -> &mut Self::Output {
+                self.index_mut(index as usize)
+            }
+        }
 
-impl<T: Sized + Clone> Index<$ty> for RawFlatCharMap<T> {
-    type Output = T;
-    fn index(&self, index: $ty) -> &Self::Output {
-        self.index(index as usize)
-    }
-}
+        impl<T: Sized + Clone> Index<$ty> for RawCharMap<T> {
+            type Output = T;
+            fn index(&self, index: $ty) -> &Self::Output {
+                self.index(index as usize)
+            }
+        }
 
-impl<T: Sized + Clone> IndexMut<$ty> for RawFlatCharMap<T> {
-    fn index_mut(&mut self, index: $ty) -> &mut Self::Output {
-        self.index_mut(index as usize)
-    }
-}
+        impl<T: Sized + Clone> IndexMut<$ty> for RawCharMap<T> {
+            fn index_mut(&mut self, index: $ty) -> &mut Self::Output {
+                self.index_mut(index as usize)
+            }
+        }
     };
 }
 
