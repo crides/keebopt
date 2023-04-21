@@ -74,6 +74,18 @@ impl ChordMap {
         self.0.iter().collect::<BTreeSet<_>>().len() == self.0.iter().count()
     }
 
+    pub fn from_map(inp: &BTreeMap<char, Chord>) -> Self {
+        let mut map = CharMap::new();
+        for (&k, &v) in inp.iter() {
+            map[k] = v;
+        }
+        Self(map)
+    }
+
+    pub fn to_map(&self) -> BTreeMap<char, Chord> {
+        self.0.iter().map(|(c, &ch)| (c, ch)).collect()
+    }
+
     pub fn print(&self, cost_map: &CostMap) {
         let mut key_map =
             vec![vec![' '; cost_map.fingers[0].keys.len()]; cost_map.fingers.len()];
