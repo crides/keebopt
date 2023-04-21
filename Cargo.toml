@@ -16,7 +16,8 @@ serde_derive = "*"
 serde_json = "*"
 serde_yaml = "*"
 rand = "*"
-clap = { version = "3.0", features = ["cargo"] }
+clap = { version = "4", features = ["cargo", "derive"] }
 rayon = "*"
 coz = "*"
 itertools = "0.10"
+nom = "7.1.3"
