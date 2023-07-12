@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate serde_derive;
 // mod annealing;
+mod optimize;
 mod charmap;
 mod data;
 mod layout;
@@ -10,7 +11,8 @@ use std::fs::File;
 
 use clap::{arg, command, Args, Parser, Subcommand};
 
-use layout::{optimize, CostMap};
+use layout::CostMap;
+use optimize::optimize;
 
 use crate::layout::ChordMap;
 
@@ -30,8 +32,10 @@ enum Subcmds {
     Opt {
         #[arg(short = 'o', long)]
         output: Option<String>,
-        #[arg(short = 'r', long)]
-        rounds: Option<usize>,
+        #[arg(short = 'r', long, default_value_t = 500)]
+        rounds: usize,
+        #[arg(short = 'a', long, default_value_t = false)]
+        annealed: bool,
         #[command(flatten)]
         freq: FreqInput,
     },
@@ -87,10 +91,11 @@ fn main() {
             output,
             rounds,
             freq,
+            annealed,
         } => {
             let (freq_data_raw, chars) = get_freqs(&freq);
             println!("chars: len: {}, {:?}", chars.len(), chars);
-            let res = optimize(&phys, &chars, &freq_data_raw, rounds.unwrap_or(500));
+            let res = optimize(&phys, &chars, &freq_data_raw, rounds, annealed);
             if let Some(output) = output {
                 std::fs::write(
                     &output,
